@@ -1,0 +1,410 @@
+---
+title: "Proyecto_final_MLI"
+author: "Tomas"
+date: "2024-03-05"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+##############################################
+###
+      Machine Learning project
+      Tomás de Navascués - 2024/02/24
+###
+##############################################
+
+PARTE 1: ANÁLISIS DESCRIPTIVO
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(patchwork)
+```
+
+Leemos los datos y los limpiamos
+
+```{r}
+test <- read_csv("Breast_Cancer_test_completo (1).csv", 
+                 col_names = FALSE)
+train <- read_delim("Breast_Cancer_train (1).data", 
+                    delim = "_", escape_double = FALSE, col_names = FALSE, 
+                    trim_ws = TRUE)
+
+# Combinamos los dataframes para limpiarlos a la vez
+data <-rbind(train,test)
+
+# Renombramos las variables
+colnames(data) <- c('Sample code number','CT','UCSize','UCShape','MA','SECS','BN','BC',
+                    'NN','Mit','Group','Class')
+
+# Limpiamos los datos
+data[] <- lapply(data, gsub, pattern='h', replacement='')
+data[] <- lapply(data, gsub, pattern='"', replacement='')
+
+#table(data$CT)
+data$CT[which(data$CT=='100')] <- 10
+data$CT[which(data$CT=='30')] <- 3
+data$CT[which(data$CT=='4.0')] <- 4
+data$CT[which(data$CT=='80')] <- 8
+
+#table(data$UCSize)
+data$UCSize[which(data$UCSize=='30')] <- 3
+
+#table(data$UCShape)
+data$UCShape[which(data$UCShape=='-7')] <- 7
+data$UCShape[which(data$UCShape=='1.0')] <- 1
+data$UCShape[which(data$UCShape=='80')] <- 8
+
+#table(data$MA)
+data$MA[which(data$MA=='100')] <- 10
+data$MA[which(data$MA=='-1')] <- 1
+
+#table(data$SECS)
+data$SECS[which(data$SECS=='100')] <- 10
+data$SECS[which(data$SECS=='60')] <- 6
+
+#table(data$BN)
+
+#table(data$BC)
+data$MA[which(data$MA=='11')] <- 1
+
+#table(data$NN)
+data$NN[which(data$NN=='2.0')] <- 2
+
+#table(data$Mit)
+
+#table(data$Group)
+data$Group[which(data$Group=='60')] <- 6
+
+#table(data$Class)
+data$Class[which(data$Class=='20')] <- 2
+data$Class[which(data$Class=='44')] <- 4
+data$Class[which(data$Class=='3')] <- '?'
+```
+
+Terminamos de manipular los datos, los guardamos y vemos cómo se distribuyen
+
+```{r}
+# Convertimos los datos en variables numéricas para hacer boxplots
+data$CT <- as.numeric(data$CT)
+data$UCSize <- as.numeric(data$UCSize)
+data$UCShape <- as.numeric(data$UCShape)
+data$MA <- as.numeric(data$MA)
+data$SECS <- as.numeric(data$SECS)
+data$BN <- as.numeric(data$BN)
+data$BC <- as.numeric(data$BC)
+data$NN <- as.numeric(data$NN)
+data$Mit <- as.numeric(data$Mit)
+data$Group <- as.numeric(data$Group)
+data$Class <- as.numeric(data$Class)
+
+# Convertimos la variable target en un factor y le asignamos los niveles correspondientes
+data$Class <- as.factor(data$Class)
+levels(data$Class) <- c("B", "M") # B = Benigno, M = Maligno
+
+# Guardamos el dataset limpiado
+save(data, file="data_modificado.RData")
+
+# Hacemos boxplots de las variables para ver cómo se distribuyen
+
+plots_list <- list()
+train <- data[1:559,]
+train$Class <- as.numeric(train$Class)
+
+for(variable in colnames(data[2:11])){
+  plot <- ggplot(train,aes(x=Class,y=!!sym(variable)))+
+    geom_boxplot()+
+    ggtitle(paste(variable))
+  plots_list[[variable]]<-plot
+}
+all_plots <- wrap_plots(plots_list,ncol = 3)
+print(all_plots)
+```
+
+Se ve claramente que los datos no son normales, y que, en muchos casos, se concentran en ciertos valores. Sin embargo, hablar aquí de normalidad propiamente no tiene mucho sentido porque son variables numéricas discretas, en una escala de menor a mayor de 1 a 10. Por tanto, hablar de que sigan una distribución normal continua no tiene sentido.
+
+Además, tampoco consideraremos que son factores como tal, puesto que, aunque sean discretas, sí que son cuantitativas, ya que implican una gradación de menos (1) a más (10). En este sentido, aplicar transformaciones como las de boxcox no tiene mucho sentido, ni tampoco centrarlos y escalarlos. Por eso, pasaremos a la realización del modelo sin manipular más los datos.
+
+
+
+
+PARTE 2: CONSTRUCCIÓN DEL MODELO
+
+```{r}
+
+# Cargamos el dataset limpiado
+load("data_modificado.RData")
+
+# Lo separamos en las variables para el train y el test
+train <- data[1:559,]
+test <- data[560:699,]
+
+
+### Hacemos las comparaciones bivariantes con el target y eliminamos las variables que 
+# no son significativas.
+vector_con_datos <- NULL
+
+for(columna in 2:11){
+  #print(names(train)[columna])
+  temporal <- data.frame(train[,c(columna,12)])
+  formula <- as.formula(paste0("Class ~", names(train)[columna]))
+  mod <- glm(formula, data = temporal, family = binomial(link = "logit"))
+  
+  ss <- summary(mod)
+  coef <- ss$coefficients
+  
+  if(nrow(coef)>2) 
+  {               
+    hasta <- nrow(coef)  
+    for(agregar in 2:hasta) 
+    {
+      vector_con_datos <- c(vector_con_datos, rownames(coef)[agregar], coef[agregar,1], coef[agregar,4])
+    }
+  } else {
+    vector_con_datos <- c(vector_con_datos, names(train)[columna], coef[2,1], coef[2,4])
+  }
+  
+}
+
+df <- data.frame(matrix(vector_con_datos, ncol = 3, byrow = T))
+names(df) <- c("Factor","Estimate","Value")
+print(df)
+```
+
+Vemos que cada variable por separado sale significativa, por lo que de momento no eliminamos ninguna.
+
+Ahora construimos el modelo global, con todas las variables:
+
+```{r}
+mod <- glm("Class ~ .", data = train[,-1], family = binomial(link="logit"))
+summary(mod)
+```
+
+Vamos quitando las variables no significativas. Consideramos no significativas aquellas con un p-valor mayor que 0.05
+
+```{r}
+mod <- glm("Class ~ CT + UCShape + MA + SECS + BN + BC + NN + Mit + Group",
+           data = train[,-1], family = binomial(link="logit"))
+
+mod <- glm("Class ~ CT + UCShape + MA + BN + BC + NN + Mit + Group",
+           data = train[,-1], family = binomial(link="logit"))
+
+mod <- glm("Class ~ CT + MA + BN + BC + NN + Mit + Group",
+           data = train[,-1], family = binomial(link="logit"))
+
+mod <- glm("Class ~ CT + MA + BN + BC + NN + Mit",
+           data = train[,-1], family = binomial(link="logit"))
+
+mod <- glm("Class ~ CT + MA + BN + BC + NN",
+           data = train[,-1], family = binomial(link="logit"))
+summary(mod)
+
+```
+
+Una vez que tenemos el modelo predecimos en el dataframe del test
+```{r}
+prediccion <- predict(mod, type = "response", newdata = test)
+datos_predict <- cbind(test, prediccion)
+```
+
+Ploteamos las predicciones ordenadas:
+
+```{r}
+plot(sort(prediccion), type='l')
+```
+Vemos que hay una transición clara entre los dos niveles del target, esto es, la mayoría de predicciones están en torno al 0 o al 1, lo que significa que se decanta claramente por una de las dos respuestas: benigno o maligno.
+
+Hacemos un corte en 0.5 y consideramos que lo que está a un lado predice benigno y lo que esta al otro predice maligno.
+```{r}
+test$predicted <- ifelse(prediccion <= 0.5,0,1)
+
+# Hacemos una tabla para ver los aciertos y los errores:
+tt <- table(test$Class,test$predicted)
+tt
+```
+El modelo se ha adaptado bien a los datos, solo ha fallado 3 de 140.
+
+
+Calculamos los índices: sensibilidad, especificidad y precisión.
+
+```{r}
+# Se considerarán los tumores benignos como positivos y los malignos como negativos.
+sensibilidad = tt[1,1]/(tt[1,1]+tt[1,2]) # los TP (true positive) entre TP+FN (falso negativo)
+especificidad = tt[2,2]/(tt[2,2]+tt[2,1]) # los TN (true negative) entre TN + FP
+precision = (tt[1,1]+tt[2,2])/(tt[1,1]+tt[1,2]+tt[2,1]+tt[2,2]) # TP+TN entre todos
+print(c(sensibilidad,especificidad,precision))
+```
+Podemos ver que los índices salen muy altos, por lo que nuestro modelo predice en general de forma muy correcta.
+
+###################################
+
+Ahora hacemos el cross-validation dividiendo el dataset del train en tres slots. Para cada slot consideraremos que es el validation y que el training dataset son los dos slots restantes, y haremos predict en el validation. De este modo queremos ver si los resultados, o sea, las predicciones, dependen mucho de los datos con los que se hace el train, y lo veremos a través de los índices de cada uno de los tres modelos.
+
+```{r}
+# Fijamos la semilla para que sea reproducible, a la hora de obtener los mismos slots.
+set.seed(1)
+
+sam <- sample(1:nrow(train),nrow(train),replace = FALSE)
+sam1 <- sam[1:(nrow(train)/3)]
+sam2 <- sam[(nrow(train)/3):(2*(nrow(train)/3))]
+sam3 <- sam[(2*(nrow(train)/3)):nrow(train)]
+
+# Separamos el train en tres slots
+slot1 <- train[sam1,]
+slot2 <- train[sam2,]
+slot3 <- train[sam3,]
+
+# Definimos los tres training sets
+train1 <- rbind(slot2,slot3)
+train2 <- rbind(slot1,slot3)
+train3 <- rbind(slot1,slot2)
+```
+ 
+Entrenamos el modelo con cada uno de estos trains. Hacemos el stepwise con cada uno.
+
+```{r}
+## TRAIN1
+mod1 <- glm("Class ~ .", data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCSize + UCShape +SECS + MA + BN + BC + NN + Mit",
+            data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCSize + UCShape +SECS + MA + BN + BC + NN",
+            data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCShape +SECS + MA + BN + BC + NN",
+            data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCShape + MA + BN + BC + NN",
+            data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCShape + MA + BC + NN",
+            data = train1[,-1], family = binomial(link="logit"))
+
+mod1 <- glm("Class ~ CT + UCShape + MA + BC",
+            data = train1[,-1], family = binomial(link="logit"))
+summary(mod1)
+
+## TRAIN2
+mod2 <- glm("Class ~ .", data = train2[,-1], family = binomial(link="logit"))
+
+mod2 <- glm("Class ~ CT + UCSize + UCShape + MA + BN + BC + NN + Mit + Group",
+            data = train2[,-1], family = binomial(link="logit"))
+
+mod2 <- glm("Class ~ CT + MA + BN + BC + NN + Mit + Group",
+            data = train2[,-1], family = binomial(link="logit"))
+
+mod2 <- glm("Class ~ CT + MA + BN + BC + NN + Group",
+            data = train2[,-1], family = binomial(link="logit"))
+
+mod2 <- glm("Class ~ CT + MA + BN + BC + NN",
+            data = train2[,-1], family = binomial(link="logit"))
+summary(mod2)
+
+## TRAIN3
+mod3 <- glm("Class ~ .", data = train3[,-1], family = binomial(link="logit"))
+
+mod3 <- glm("Class ~ CT + UCSize + UCShape + MA + SECS + BN + BC + NN + Mit",
+            data = train3[,-1], family = binomial(link="logit"))
+
+mod3 <- glm("Class ~ CT + UCSize + MA + SECS + BN + BC + NN + Mit",
+            data = train3[,-1], family = binomial(link="logit"))
+
+mod3 <- glm("Class ~ CT + UCSize + MA + BN + BC + NN + Mit",
+            data = train3[,-1], family = binomial(link="logit"))
+
+mod3 <- glm("Class ~ CT + MA + BN + BC + NN + Mit",
+            data = train3[,-1], family = binomial(link="logit"))
+summary(mod3)
+```
+
+
+Hacemos predict de cada modelo en su respectivo slot y repetimos los pasos seguidos con el modelo general.
+
+```{r}
+prediccion1 <- predict(mod1,type = "response", newdata = slot1)
+prediccion2 <- predict(mod2,type = "response", newdata = slot2)
+prediccion3 <- predict(mod3,type = "response", newdata = slot3)
+
+slot1$predicted1 <- ifelse(prediccion1 <= 0.5,0,1)
+slot2$predicted2 <- ifelse(prediccion2 <= 0.5,0,1)
+slot3$predicted3 <- ifelse(prediccion3 <= 0.5,0,1)
+
+tt1 <- table(slot1$Class,slot1$predicted1)
+tt2 <- table(slot2$Class,slot2$predicted2)
+tt3 <- table(slot3$Class,slot3$predicted3)
+
+sensibilidad1 = tt1[1,1]/(tt1[1,1]+tt1[1,2])
+especificidad1 = tt1[2,2]/(tt1[2,2]+tt1[2,1])
+precision1 = (tt1[1,1]+tt1[2,2])/(tt1[1,1]+tt1[1,2]+tt1[2,1]+tt1[2,2]) 
+
+sensibilidad2 = tt2[1,1]/(tt2[1,1]+tt2[1,2])
+especificidad2 = tt2[2,2]/(tt2[2,2]+tt2[2,1])
+precision2 = (tt2[1,1]+tt2[2,2])/(tt2[1,1]+tt2[1,2]+tt2[2,1]+tt2[2,2]) 
+
+sensibilidad3 = tt3[1,1]/(tt3[1,1]+tt3[1,2])
+especificidad3 = tt3[2,2]/(tt3[2,2]+tt3[2,1])
+precision3 = (tt3[1,1]+tt3[2,2])/(tt3[1,1]+tt3[1,2]+tt3[2,1]+tt3[2,2]) 
+df <- data.frame("sensibilidades" = c(sensibilidad1,sensibilidad2,sensibilidad3),
+                 "especificidad" = c(especificidad1,especificidad2,especificidad3),
+                 "precision" = c(precision1,precision2,precision3))
+print(df)
+```
+Comprobamos que los índices no varían mucho entre los slots, por lo que hemos validado de forma efectiva que el resultado no depende demasiado de los datos.
+
+
+A continuación vamos a comprobar que el cutoff escogido de 0.5 es razonable, y cercano al
+óptimo. Para ello probaremos una serie de valores de cutoff entre 0 y 1 y veremos cómo
+son los índices.
+```{r}
+# Hacemos una funcion que calcula los índices para el test y cierta predicción, variando 
+# el cutoff. De este modo, probando varios cutoffs buscaremos el que mejore los índices.
+calcula_indices <- function(test,prediccion,cutoff=0.5){
+  test$predicted <- ifelse(prediccion <= cutoff,0,1)
+  tt <- table(test$Class,test$predicted)
+  sensibilidad = tt[1,1]/(tt[1,1]+tt[1,2]) 
+  especificidad = tt[2,2]/(tt[2,2]+tt[2,1])
+  precision = (tt[1,1]+tt[2,2])/(tt[1,1]+tt[1,2]+tt[2,1]+tt[2,2])
+  return(c(sensibilidad,especificidad,precision))
+}
+
+cutoffs <- seq(0.01,0.99,by=0.01)
+parametros <- matrix(, nrow = length(cutoffs), ncol = 3)
+k = 1
+for(i in cutoffs){
+  parametros[k,] <- calcula_indices(test,prediccion,i)
+  k=k+1
+}
+
+plot(parametros[,1]) # vemos que las sensibilidades van aumentando
+plot(parametros[,2]) # pero las especificidades disminuyen
+plot(parametros[,3]) # las precisiones si que alcanzan un máximo en torno al centro
+```
+
+Podemos asumir que el cutoff óptimo está en el centro, o sea, en 0.5, que es el que pusimos.
+
+
+
+En definitiva, nos quedamos con que el modelo final es el siguiente, como ya se estableció
+```{r}
+mod <- glm("Class ~ CT + MA + BN + BC + NN",
+           data = train[,-1], family = binomial(link="logit"))
+summary(mod)
+```
+Se ha encontrado que este es el modelo que mejor se ajusta a los datos, el que mejor los representa y predice.
+
+
+
+
+
+
+
+
+
+
